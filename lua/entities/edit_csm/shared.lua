@@ -18,20 +18,24 @@ ENT.AdminOnly = true
 ENT.PrintName = "CSM Editor"
 ENT.Category = "Editors"
 
+CSM = CSM or {}
+
 local sun = {
 	direction = Vector(0, 0, 0),
 	obstruction = 0,
 }
-local warnedyet = false
+CSM.warnedyet = false
+CSM.csmEnabledPrev = CSM.csmEnabledPrev or false -- Solves a bug where multiple ProjectedTextures were created when this was autorefreshed.
+
 cvar_csm_legacydisablesun = CreateClientConVar(	 "csm_legacydisablesun", 0,  true, false)
 cvar_csm_haslightenv = CreateClientConVar(	 "csm_haslightenv", 0,  false, false)
 cvar_csm_hashdr = CreateClientConVar(	 "csm_hashdr", 0,  false, false)
 cvar_csm_enabled = CreateClientConVar(	 "csm_enabled", 1,  false, false)
 
-CreateClientConVar(	 "csm_update", 1,  false, false)
-CreateClientConVar(	 "csm_filter", 0.08,  false, false)
-CreateClientConVar(	 "csm_spread_layer_alloctype", 0,  false, false)
-CreateClientConVar(	 "csm_spread_layer_reservemiddle", 1,  false, false)
+CreateClientConVar(	 "csm_update", 1,  true, false)
+CreateClientConVar(	 "csm_filter", 0.08,  true, false)
+CreateClientConVar(	 "csm_spread_layer_alloctype", 0,  true, false)
+CreateClientConVar(	 "csm_spread_layer_reservemiddle", 1,  true, false)
 
 
 CreateConVar(	 "csm_stormfoxsupport", 0,  FCVAR_ARCHIVE)
@@ -44,11 +48,10 @@ local RemoveStaticSunPrev = false
 local HideRTTShadowsPrev = false
 local BlobShadowsPrev = false
 local ShadowFilterPrev = 1.0
-local DepthBiasPrev = 1.0
-local SlopeScaleDepthBiasPrev = 1.0
+--Unused:
+--local DepthBiasPrev = 1.0
+--local SlopeScaleDepthBiasPrev = 1.0
 local shadfiltChanged = true
-local csmEnabledPrev = false
-local useskyandfog = false
 local furtherEnabled = false
 local furtherEnabledPrev = false
 local furtherEnabledShadows = false
@@ -77,31 +80,35 @@ local lightAlloc = {} -- var PISS --old name for reference, maybe stop using dum
 --local SHIT = {} -- var SHIT
 local lightPoints = {} -- var FUCK
 
+local sv_cheats = GetConVar("sv_cheats")
+function RunCheatConsoleCommand(...) -- If cheats are disabled, don't run cheat commands.
+	if sv_cheats:GetBool() then
+		RunConsoleCommand(...)
+	end
+end
+
 -- https://youtu.be/gTR2TVXbMGI?t=102
 -- fix for 1:48
 function SkyBoxFixOn()
-	
 	local fog_controller = ents.FindByClass("env_fog_controller")[1]
 	if (fog_controller) then 
 		fog_controller:SetKeyValue("farz", 80000)
 	end
-	RunConsoleCommand("r_farz", "80000")
+	RunCheatConsoleCommand("r_farz", "80000")
 	--hook.Add( "PreDrawOpaqueRenderables", "RealCSMSkyboxViewFix",  SkyBoxFixFunction)
 end
 
 function SkyBoxFixOff()
-	
 	if (fog_controller) then 
 		fog_controller:SetKeyValue("farz", -1)
 	end
-	RunConsoleCommand("r_farz", "-1")
+	RunCheatConsoleCommand("r_farz", "-1")
 	--hook.Remove( "PreDrawOpaqueRenderables", "RealCSMSkyboxViewFix")
 end
-function SkyBoxFixFunction(isDrawingDepth, isDrawSkybox, isDraw3DSkybox )
-	
-	
-	if (!isDrawSkybox) then return nil end
-	if (isDraw3DSkybox) then return nil end
+
+function SkyBoxFixFunction(isDrawingDepth, isDrawSkybox, isDraw3DSkybox)
+	if !isDrawSkybox then return nil end
+	if isDraw3DSkybox then return nil end
 	--if (GetConVar( "csm_enabled" ):GetInt() != 1) then return nil end
 	--if (GetConVar( "csm_skyboxfix" ):GetInt() != 1) then return nil end
 	--render.SuppressEngineLighting( isDrawSkybox && !isDraw3DSkybox )
@@ -111,19 +118,20 @@ function SkyBoxFixFunction(isDrawingDepth, isDrawSkybox, isDraw3DSkybox )
 	--print("gi")
 end
 
-if (CLIENT) then
-	if (render.GetHDREnabled()) then
+if CLIENT then
+	if render.GetHDREnabled() then
 		RunConsoleCommand("csm_hashdr", "1")
 	else
 		RunConsoleCommand("csm_hashdr", "0")
 	end
 end
-if (SERVER) then
-	util.AddNetworkString( "killCLientShadowsCSM" )
-	util.AddNetworkString( "PlayerSpawned" )
-	util.AddNetworkString( "hasLightEnvNet" )
-	util.AddNetworkString( "csmPropWakeup" )
-	util.AddNetworkString( "ReloadLightMapsCSM" )
+
+if SERVER then
+	util.AddNetworkString("killCLientShadowsCSM")
+	util.AddNetworkString("PlayerSpawned")
+	util.AddNetworkString("hasLightEnvNet")
+	util.AddNetworkString("csmPropWakeup")
+	util.AddNetworkString("ReloadLightMapsCSM")
 	if (table.Count(ents.FindByClass("light_environment")) > 0) then
 		RunConsoleCommand("csm_haslightenv", "1")
 	end
@@ -139,7 +147,7 @@ local AppearanceKeys = {
 	{ Position = 0.75, SunColour = Color(  0,   0,   0, 255), SunBrightness =  0.0, ScreenDarkenFactor = 0.0, SkyTopColor = Vector(0.00, 0.00, 0.00), SkyBottomColor = Vector(0.00, 0.00, 0.00), SkyDuskColor = Vector(0.00, 0.03, 0.03), SkySunColor = Vector(0.00, 0.00, 0.00), FogColor = Vector( 23,  36,  41) }
 }
 
-net.Receive( "hasLightEnvNet", function( len, ply )
+net.Receive("hasLightEnvNet", function(len, ply)
 	RunConsoleCommand("csm_haslightenv", "1")
 end)
 function wakeup()
@@ -151,7 +159,7 @@ function wakeup()
 	end
 end
 function findlight()
-	if (SERVER) then
+	if SERVER then
 		hasLightEnvs = (table.Count(lightenvs) > 0)
 		if (table.Count(ents.FindByClass("light_environment")) > 0) then
 			RunConsoleCommand("csm_haslightenv", "1")
@@ -165,7 +173,7 @@ end
 function warn()
 	findlight()
 	if CLIENT and (GetConVar( "csm_haslightenv" ):GetInt() == 0 && !GetConVar( "csm_disable_warnings" ):GetBool()) then
-		Derma_Message( "This map has no named light_environment, the CSM will not look nearly as good as it could.", "CSM Alert!", "OK!" )
+		--Derma_Message( "This map has no named light_environment, the CSM will not look nearly as good as it could.", "CSM Alert!", "OK!" )
 	end
 	--print(hasLightEnvs)
 end
@@ -175,24 +183,26 @@ function ENT:createlamps()
 	for i = 1, 3 do
 		self.ProjectedTextures[i] = ProjectedTexture()
 		self.ProjectedTextures[i]:SetEnableShadows(true)
-		if (i == 1) then
+		if i == 1 then
 			self.ProjectedTextures[i]:SetTexture("csm/mask_center")
 			if perfMode then
 				self.ProjectedTextures[i]:Remove()
 			end
 		else
-			if (i == 2) and perfMode then
+			if i == 2 and perfMode then
 				self.ProjectedTextures[i]:SetTexture("csm/mask_center")
 			else
 				self.ProjectedTextures[i]:SetTexture("csm/mask_ring")
 			end
 		end
 	end
-	if (furtherEnabled or !harshCutoff) then
+
+	if furtherEnabled or !harshCutoff then
 		self.ProjectedTextures[3]:SetTexture("csm/mask_ring") 
 	else
 		self.ProjectedTextures[3]:SetTexture("csm/mask_end")
 	end
+
 	if spreadEnabled and CLIENT then
 		self:allocLights()
 		self.ProjectedTextures[2]:SetTexture("csm/mask_center")
@@ -202,25 +212,30 @@ function ENT:createlamps()
 			self.ProjectedTextures[i + 4]:SetTexture("csm/mask_center")
 		end
 	end
-
-
 end
 
 function ENT:SUNOff()
-	if (SERVER) then -- TODO: make this turn off only on the client
-		for k, v in ipairs(ents.FindByClass( "light_environment" )) do
+	if SERVER then -- TODO: make this turn off only on the client
+		for k, v in ipairs(ents.FindByClass("light_environment")) do
 			v:Fire("turnoff")
 		end
 	end
 end
 function ENT:SUNOn()
-	if (SERVER) then -- TODO: make this turn off only on the client
-		for k, v in ipairs(ents.FindByClass( "light_environment" )) do
+	if SERVER then -- TODO: make this turn off only on the client
+		for k, v in ipairs(ents.FindByClass("light_environment")) do
 			v:Fire("turnon")
 		end
-		net.Start( "ReloadLightMapsCSM" )
+
+		net.Start("ReloadLightMapsCSM")
 		net.Broadcast()
 	end
+end
+
+function ProjectedTextureFilter(val)
+	RunConsoleCommand("r_projectedtexture_filter", 1)
+	RunConsoleCommand("r_projectedtexture_filter", 0)
+	RunConsoleCommand("r_projectedtexture_filter", val)
 end
 
 function ENT:Initialize()
@@ -231,7 +246,8 @@ function ENT:Initialize()
 			v:Remove()
 		end
 	end
-	RunConsoleCommand("r_projectedtexture_filter", "0.1")
+
+	ProjectedTextureFilter("0.1")
 	if !GetConVar( "csm_blobbyao" ):GetBool() then
 		DisableRTT()
 	else
@@ -346,6 +362,8 @@ function ENT:Initialize()
 			RunConsoleCommand("csm_enabled", "0")
 			Frame:Close()
 		end
+
+		self.FirstUpdate = true
 	end
 
 	if (SERVER) then
@@ -512,11 +530,11 @@ net.Receive( "csmPropWakeup", function( len, ply )
 	end
 end )
 
-net.Receive( "killCLientShadowsCSM", function( len, ply )
+net.Receive("killCLientShadowsCSM", function(len, ply)
 	if CLIENT and fpshadowcontrollerCLIENT and fpshadowcontrollerCLIENT:IsValid() then
 		fpshadowcontrollerCLIENT:Remove()
 	end
-end )
+end)
 
 function ENT:UpdateTransmitState()
 	return TRANSMIT_ALWAYS
@@ -524,13 +542,12 @@ end
 
 
 function reloadLightmaps()
-	if (CLIENT) then
+	if CLIENT then
 		render.RedownloadAllLightmaps(false ,true)
 	end
 end
 
 function ENT:OnRemove()
-	--print("Removed")
 	if fpshadowcontrollerCLIENT and fpshadowcontrollerCLIENT:IsValid() then
 		fpshadowcontrollerCLIENT:Remove()
 	end
@@ -546,9 +563,9 @@ function ENT:OnRemove()
 		end
 		if GetConVar( "csm_blobbyao" ):GetBool() then
 			RunConsoleCommand("r_shadowrendertotexture", "1")
-			RunConsoleCommand("r_shadowdist", "10000")
+			RunCheatConsoleCommand("r_shadowdist", "10000")
 		end
-		RunConsoleCommand("r_projectedtexture_filter", "1")
+		ProjectedTextureFilter("1")
 
 		if (self:GetRemoveStaticSun()) then
 
@@ -567,11 +584,12 @@ function ENT:OnRemove()
 			end
 		end
 	end
+
 	if SERVER and fpshadowcontroller and fpshadowcontroller:IsValid() then
 		fpshadowcontroller:Remove()
-
 	end
-	if (CLIENT) then
+
+	if CLIENT then
 		for i, projectedTexture in pairs(self.ProjectedTextures) do
 			projectedTexture:Remove()
 		end
@@ -583,27 +601,29 @@ end
 rttenabled = true 
 
 function DisableRTTHook(ent)
-	ent:DrawShadow( ent.stored_shadow_value or true )
+	ent:DrawShadow(ent.stored_shadow_value or true)
 end
 
 function DisableRTT()
-	if (rttenabled == false) then return end
-	if (SERVER) then return end
+	if rttenabled == false then return end
+	if SERVER then return end
+
 	rttenabled = false
 	print("[Real CSM] - Disabling RTT Shadows")
-	RunConsoleCommand("r_shadows_gamecontrol", "0")
+	RunCheatConsoleCommand("r_shadows_gamecontrol", "0")
 	hook.Add( "OnEntityCreated", "RealCSMDisableRTTHook", DisableRTTHook)
 	for k, v in pairs(ents.GetAll()) do
-		v:DrawShadow( v.stored_shadow_value or true )
+		v:DrawShadow(v.stored_shadow_value or true)
 	end
 end
 
 function EnableRTT()
-	if (rttenabled == true) then return end
-	if (SERVER) then return end
+	if rttenabled == true then return end
+	if SERVER then return end
+
 	rttenabled = true 
 	print("[Real CSM] - Enabling RTT Shadows")
-	RunConsoleCommand("r_shadows_gamecontrol", "1")
+	RunCheatConsoleCommand("r_shadows_gamecontrol", "1")
 	hook.Remove( "OnEntityCreated", "RealCSMDisableRTTHook" )
 	for k, v in pairs(ents.GetAll()) do
 		v:DrawShadow(v.stored_shadow_value or true ) 
@@ -628,11 +648,12 @@ hook.Add( "ShadnowFilterChange", "shadfiltchanged", function()
 end)
 
 function ENT:Think()
-	if (GetConVar( "csm_enabled" ):GetInt() == 1) and (csmEnabledPrev == false) then
+	local csm_enabled = cvar_csm_enabled:GetBool()
+	if csm_enabled and !CSM.csmEnabledPrev then
 		furtherEnabledShadowsPrev = !GetConVar( "csm_furthershadows" ):GetBool()
 		furtherEnabledPrev = !GetConVar( "csm_further" ):GetBool()
-		csmEnabledPrev = true
-		if (self:GetRemoveStaticSun()) then
+		CSM.csmEnabledPrev = true
+		if self:GetRemoveStaticSun() then
 			if (GetConVar( "csm_legacydisablesun" ):GetInt() == 1) then
 				RunConsoleCommand("r_ambientlightingonly", "1")
 
@@ -642,25 +663,29 @@ function ENT:Think()
 				self:SUNOff()
 			end
 		end
+
 		RunConsoleCommand("r_radiosity", GetConVar( "csm_propradiosity" ):GetString())
 		if (GetConVar( "csm_wakeprops" ):GetBool()) then
 			wakeup()
 		end
+
 		if (self:GetHideRTTShadows()) then
 			DisableRTT()
 			BlobShadowsPrev = false
 		end
+
 		if GetConVar( "csm_blobbyao" ):GetBool() then
 			EnableRTT()
 			RunConsoleCommand("r_shadowrendertotexture", "0")
-			RunConsoleCommand("r_shadowdist", "20")
+			RunCheatConsoleCommand("r_shadowdist", "20")
 		end
-		if (CLIENT) then
+
+		if CLIENT then
 			self:createlamps()
 		end
 	end
 
-	if (GetConVar( "csm_enabled" ):GetInt() == 0) and (csmEnabledPrev == true) then
+	if !csm_enabled and csmEnabledPrev then
 		csmEnabledPrev = false
 		if (self:GetRemoveStaticSun()) then
 			if (GetConVar( "csm_legacydisablesun" ):GetInt() == 1) then
@@ -677,7 +702,7 @@ function ENT:Think()
 			wakeup()
 		end
 		RunConsoleCommand("r_shadowrendertotexture", "1")
-		RunConsoleCommand("r_shadowdist", "10000")
+		RunCheatConsoleCommand("r_shadowdist", "10000")
 		if (self:GetHideRTTShadows()) then
 			EnableRTT()
 		end
@@ -689,9 +714,8 @@ function ENT:Think()
 		end
 	end
 
-
 	propradiosity = GetConVar( "csm_propradiosity" ):GetString()
-	if CLIENT and (propradiosityPrev != propradiosity) and GetConVar( "csm_enabled" ):GetBool() then
+	if CLIENT and (propradiosityPrev != propradiosity) and csm_enabled then
 		RunConsoleCommand("r_radiosity", propradiosity)
 		if (GetConVar( "csm_wakeprops" ):GetBool()) then
 			net.Start( "csmPropWakeup" )
@@ -699,7 +723,7 @@ function ENT:Think()
 		end
 		propradiosityPrev = propradiosity
 	end
-	if (GetConVar( "csm_enabled" ):GetInt() != 1) then return end
+	if !csm_enabled then return end
 	--print("hi")
 	shadfiltChanged = false
 
@@ -741,9 +765,9 @@ function ENT:Think()
 		harshCutoffPrev = harshCutoff
 	end
 
-	if (furtherEnabledPrev != furtherEnabled) then
-		if (furtherEnabled) then
-			if (CLIENT) then
+	if furtherEnabledPrev != furtherEnabled then
+		if furtherEnabled then
+			if CLIENT then
 				self.ProjectedTextures[4] = ProjectedTexture()
 				if (harshCutoff) then
 					self.ProjectedTextures[3]:SetTexture("csm/mask_ring")
@@ -760,7 +784,7 @@ function ENT:Think()
 			end
 			furtherEnabledPrev = true
 		else
-			if CLIENT and (self.ProjectedTextures[4] != nil) and (self.ProjectedTextures[4]:IsValid()) then -- hacky: fix the cause properly
+			if CLIENT and (self.ProjectedTextures[4] != nil) and self.ProjectedTextures[4]:IsValid() then -- hacky: fix the cause properly
 				self.ProjectedTextures[4]:Remove()
 				if (harshCutoff) then
 					self.ProjectedTextures[3]:SetTexture("csm/mask_end")
@@ -771,7 +795,6 @@ function ENT:Think()
 			furtherEnabledPrev = false
 		end
 	end
-
 
 	spreadSample = GetConVar( "csm_spread_samples" ):GetInt()
 	if (spreadSamplePrev != spreadSample) then
@@ -804,7 +827,7 @@ function ENT:Think()
 	end
 
 	perfMode = GetConVar( "csm_perfmode" ):GetBool()
-	if (perfModePrev != perfMode) and GetConVar( "csm_enabled" ):GetBool() then
+	if (perfModePrev != perfMode) and csm_enabled then
 		if (perfMode) then
 			if CLIENT and (self.ProjectedTextures[1] != nil) and (self.ProjectedTextures[1]:IsValid()) then
 				self.ProjectedTextures[2]:SetTexture("csm/mask_center")
@@ -824,7 +847,7 @@ function ENT:Think()
 	end
 
 	spreadEnabled = GetConVar( "csm_spread" ):GetBool()
-	if (spreadEnabledPrev != spreadEnabled) and GetConVar( "csm_enabled" ):GetBool() then
+	if (spreadEnabledPrev != spreadEnabled) and csm_enabled then
 		if (spreadEnabled) then
 			if CLIENT and (self.ProjectedTextures[2] != nil) and (self.ProjectedTextures[2]:IsValid()) then
 				self.ProjectedTextures[2]:SetTexture("csm/mask_center")
@@ -879,9 +902,6 @@ function ENT:Think()
 
 
 	local removestatsun = self:GetRemoveStaticSun()
-
-
-
 	if (RemoveStaticSunPrev != removestatsun) then
 		if (self:GetRemoveStaticSun()) then
 			timer.Create( "warn", 0.1, 1, warn)
@@ -916,8 +936,7 @@ function ENT:Think()
 		RemoveStaticSunPrev = removestatsun
 	end
 
-	if (CLIENT) then
-
+	if CLIENT then
 		local hiderttshad = self:GetHideRTTShadows()
 		local BlobShadows = GetConVar( "csm_blobbyao" ):GetBool()
 
@@ -938,18 +957,18 @@ function ENT:Think()
 			RunConsoleCommand("csm_filter", shadfilt)
 		end
 
-		if (BlobShadowsPrev != BlobShadows) and GetConVar( "csm_enabled" ):GetBool() then
+		if (BlobShadowsPrev != BlobShadows) and csm_enabled then
 			BlobShadowsPrev = BlobShadows
 			if (BlobShadows) then
 				HideRTTShadowsPrev = true
 				hiderttshad = false
 				RunConsoleCommand("r_shadowrendertotexture", "0")
-				RunConsoleCommand("r_shadowdist", "20")
+				RunCheatConsoleCommand("r_shadowdist", "20")
 				EnableRTT()
 				BlobShadowsPrev = true
 			else
 				RunConsoleCommand("r_shadowrendertotexture", "1")
-				RunConsoleCommand("r_shadowdist", "10000")
+				RunCheatConsoleCommand("r_shadowdist", "10000")
 				if (hiderttshad) then
 					DisableRTT()
 				else
@@ -979,9 +998,9 @@ function ENT:Think()
 			yaw = shadowcontrol:GetAngles().yaw
 			roll = shadowcontrol:GetAngles().roll
 		else
-			if (warnedyet == false && !GetConVar( "csm_disable_warnings" ):GetBool()) then
+			if (!CSM.warnedyet && !GetConVar( "csm_disable_warnings" ):GetBool()) then
 				Derma_Message( "This map has no env_sun. CSM will not be able to find the sun position and rotation!", "CSM Alert!", "OK!" )
-				warnedyet = true
+				CSM.warnedyet = true
 			end
 			pitch = -180.0 + (self:GetTime() * 360.0)
 			yaw = self:GetOrientation()
@@ -1038,8 +1057,8 @@ function ENT:Think()
 	debugColours[6] = Color(255, 0, 255, 255)
 	debugColours[7] = Color(255, 255, 255, 255)
 
-	if CLIENT and (GetConVar( "csm_enabled" ):GetInt() == 1) and (GetConVar( "csm_update" ):GetInt() == 1) then
-		local position = GetViewEntity():GetPos() + offset
+	if CLIENT and csm_enabled and (GetConVar( "csm_update" ):GetInt() == 1 or self.FirstUpdate) then
+		local position = offset --GetViewEntity():GetPos() + offset -- NOTE: We only use the offset because else it would fuck up shadows on lower resolution
 
 		if (self.ProjectedTextures[1] == nil) and !perfMode then
 			self:createlamps()
@@ -1067,23 +1086,26 @@ function ENT:Think()
 			end
 		end
 
-		depthBias = GetConVar( "csm_depthbias" ):GetFloat()
-		slopeScaleDepthBias = GetConVar( "csm_slopescaledepthbias" ):GetFloat()
+		-- Having these as local can improve performance
+		local spread_samples = GetConVar( "csm_spread_samples" ):GetInt()
+		local depthBias = GetConVar( "csm_depthbias" ):GetFloat()
+		local slopeScaleDepthBias = GetConVar( "csm_slopescaledepthbias" ):GetFloat()
+		local depthresasmultiple = ((9 - GetConVar( "csm_depthresasmultiple" ):GetInt()) ^ 2) * 0.05 -- Calculates the filter for the current shadow. Improves the look of the shadow for lower qualities
+		local sunBright = self:GetSunBrightness() / 400
 		for i, projectedTexture in pairs(self.ProjectedTextures) do
 			if (shadfiltChanged) then
-				projectedTexture:SetShadowFilter(GetConVar( "csm_filter" ):GetFloat())
+				projectedTexture:SetShadowFilter(depthresasmultiple)
 			end
 			projectedTexture:SetShadowDepthBias(depthBias)
 			projectedTexture:SetShadowSlopeScaleDepthBias(slopeScaleDepthBias)
-			sunBright = (self:GetSunBrightness()) / 400
-			if (GetConVar( "csm_stormfoxsupport" ):GetInt() == 0) then
+			if !GetConVar( "csm_stormfoxsupport" ):GetBool() then
 				if (spreadEnabled) then
 					if (i == 1) then
-						projectedTexture:SetBrightness(sunBright / GetConVar( "csm_spread_samples" ):GetInt())
+						projectedTexture:SetBrightness(sunBright / spread_samples)
 					elseif (i == 2) then
-						projectedTexture:SetBrightness(sunBright / GetConVar( "csm_spread_samples" ):GetInt())
+						projectedTexture:SetBrightness(sunBright / spread_samples)
 					elseif (i > 4) then
-						projectedTexture:SetBrightness(sunBright / GetConVar( "csm_spread_samples" ):GetInt())
+						projectedTexture:SetBrightness(sunBright / spread_samples)
 					else
 						projectedTexture:SetBrightness(sunBright)
 					end
@@ -1136,8 +1158,9 @@ function ENT:Think()
 			projectedTexture:Update()
 		end
 
+		self.FirstUpdate = false
 	end
-	useskyandfog = self:GetUseSkyFogEffects()
+	local useskyandfog = self:GetUseSkyFogEffects()
 
 	if (useskyandfog) then
 		if (IsValid(self.EnvSun)) then
@@ -1264,7 +1287,6 @@ function PointOnCircle( angle, radius, offsetX, offsetY ) -- ACTUALLY NERD SHIT 
 	local y = math.sin( angle ) * radius + offsetY
 	return x, y
 end
-
 
 function CalculateAppearance(position)
 	local from, to
