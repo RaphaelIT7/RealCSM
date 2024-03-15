@@ -1058,7 +1058,7 @@ function ENT:Think()
 	debugColours[7] = Color(255, 255, 255, 255)
 
 	if CLIENT and csm_enabled and (GetConVar( "csm_update" ):GetInt() == 1 or self.FirstUpdate) then
-		local position = offset --GetViewEntity():GetPos() + offset -- NOTE: We only use the offset because else it would fuck up shadows on lower resolution
+		local position = GetViewEntity():GetPos() + offset -- NOTE: Shadows move like crazy on lower resolutions. Maybe take a look into it later and try to fix it.
 
 		if (self.ProjectedTextures[1] == nil) and !perfMode then
 			self:createlamps()
